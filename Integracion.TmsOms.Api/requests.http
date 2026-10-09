@@ -1,0 +1,203 @@
+@host = http://localhost:5073
+@apiKey = dev-secret-key
+
+### 1. Entrega exitosa (trama del caso)
+POST {{host}}/webhooks/tms
+Content-Type: application/json
+X-Api-Key: {{apiKey}}
+
+{
+  "serviceType": "LAST_MILE",
+  "dispatchType": "HOME_DELIVERY",
+  "status": "DELIVERED",
+  "subStatus": "CLIENT RECEIVED",
+  "vehicleCode": "LIMURB06VAN",
+  "courierName": "Conductor 46",
+  "details": {
+    "orderNumber": "2500000006-01",
+    "trackingNumber": "OE2500000006-01",
+    "clientCode": "01021755",
+    "clientName": "TIENDAS PERUANAS S.A.",
+    "receivedBy": "Pepito Perez",
+    "comments": "Entregado en domicilio",
+    "evidences": [
+      { "label": "Paquete", "fileType": ".jpg", "fileName": "delivered_201054.jpg", "url": "htps://beetrack.com/img/delivered_201054.jpg" },
+      { "label": "Fachada", "fileType": ".jpg", "fileName": "delivered_201055.jpg", "url": "htps://beetrack.com/img/delivered_201055.jpg" }
+    ]
+  },
+  "eventDate": "2025-04-15 16:53:07"
+}
+
+### 2. Estado del pedido 06
+GET {{host}}/diagnostics/orders/2500000006-01
+
+### 3. Visita fallida del pedido 07 (envíala 3 veces cambiando eventDate: 16:00:00, 17:00:00 y 18:00:00)
+POST {{host}}/webhooks/tms
+Content-Type: application/json
+X-Api-Key: {{apiKey}}
+
+{
+  "serviceType": "LAST_MILE",
+  "dispatchType": "HOME_DELIVERY",
+  "status": "NOT DELIVERED",
+  "subStatus": "CLIENT ABSENT",
+  "courierName": "Conductor 12",
+  "details": {
+    "orderNumber": "2500000007-01",
+    "trackingNumber": "OE2500000007-01",
+    "clientCode": "01021755",
+    "clientName": "TIENDAS PERUANAS S.A."
+  },
+  "eventDate": "2025-04-15 16:00:00"
+}
+
+### 4. Estado del pedido 07
+GET {{host}}/diagnostics/orders/2500000007-01
+
+### 5. Sin API key (debe responder 401)
+POST {{host}}/webhooks/tms
+Content-Type: application/json
+
+{ "status": "DELIVERED" }
+
+### 6. Payload inválido (debe responder 400 con los errores)
+POST {{host}}/webhooks/tms
+Content-Type: application/json
+X-Api-Key: {{apiKey}}
+
+{ "status": "VOLANDO", "details": {}, "eventDate": "15/04/2025" }
+
+### 7. Pedido inexistente (termina en la dead-letter queue tras 5 entregas)
+POST {{host}}/webhooks/tms
+Content-Type: application/json
+X-Api-Key: {{apiKey}}
+
+{
+  "serviceType": "LAST_MILE",
+  "dispatchType": "HOME_DELIVERY",
+  "status": "STARTED",
+  "details": { "orderNumber": "NO-EXISTE" },
+  "eventDate": "2025-04-15 16:00:00"
+}
+
+### 8. Estado general: cola, Outbox y tópico
+GET {{host}}/diagnostics/queue
+
+### 9. Mensajes en la dead-letter queue
+GET {{host}}/diagnostics/dead-letters
+
+### 10. Evidencias y notificación (envía de nuevo la petición 1 y luego estas dos)
+GET {{host}}/diagnostics/orders/2500000006-01/evidences
+
+###
+GET {{host}}/diagnostics/clients/01021755/notifications
+
+### 11. Evidencia que falla 4 veces: 3 intentos fallidos, el mensaje se devuelve y a la siguiente entrega se guarda
+POST {{host}}/webhooks/tms
+Content-Type: application/json
+X-Api-Key: {{apiKey}}
+
+{
+  "serviceType": "LAST_MILE",
+  "dispatchType": "HOME_DELIVERY",
+  "status": "NOT DELIVERED",
+  "subStatus": "CLIENT ABSENT",
+  "details": {
+    "orderNumber": "2500000008-01",
+    "trackingNumber": "OE2500000008-01",
+    "clientCode": "02034411",
+    "clientName": "SUPERMERCADOS DEL SUR S.A.C.",
+    "evidences": [
+      { "label": "Fachada", "fileType": ".jpg", "fileName": "fachada-FAIL-TRANSIENT-4.jpg", "url": "htps://beetrack.example/img/fachada.jpg" }
+    ]
+  },
+  "eventDate": "2025-04-15 10:00:00"
+}
+
+### 12. Evidencia inexistente: va a la dead-letter queue de evidencias
+POST {{host}}/webhooks/tms
+Content-Type: application/json
+X-Api-Key: {{apiKey}}
+
+{
+  "serviceType": "LAST_MILE",
+  "dispatchType": "HOME_DELIVERY",
+  "status": "NOT DELIVERED",
+  "subStatus": "BAD ADDRESS",
+  "details": {
+    "orderNumber": "2500000008-01",
+    "clientCode": "02034411",
+    "evidences": [
+      { "label": "Foto", "fileType": ".jpg", "fileName": "FAIL-PERMANENT.jpg", "url": "htps://beetrack.example/img/nada.jpg" }
+    ]
+  },
+  "eventDate": "2025-04-15 11:00:00"
+}
+
+###
+GET {{host}}/diagnostics/subscriptions/evidences/dead-letters
+
+### 13. Cliente caído (02034411 es dueño del pedido 08): el circuit breaker se abre y el mensaje se pospone
+POST {{host}}/diagnostics/clients/02034411/simulation
+Content-Type: application/json
+
+{ "failFirstAttempts": 100, "rejectAlways": false }
+
+###
+POST {{host}}/webhooks/tms
+Content-Type: application/json
+X-Api-Key: {{apiKey}}
+
+{
+  "serviceType": "LAST_MILE",
+  "dispatchType": "HOME_DELIVERY",
+  "status": "STARTED",
+  "details": { "orderNumber": "2500000008-01", "clientCode": "02034411" },
+  "eventDate": "2025-04-15 12:00:00"
+}
+
+###
+GET {{host}}/diagnostics/circuits
+
+### 13b. El cliente se recupera: en unos segundos el mensaje pospuesto se entrega y el circuito se cierra
+POST {{host}}/diagnostics/clients/02034411/simulation
+Content-Type: application/json
+
+{ "failFirstAttempts": 0, "rejectAlways": false }
+
+###
+GET {{host}}/diagnostics/clients/02034411/notifications
+
+###
+GET {{host}}/diagnostics/circuits
+
+### 14. Cliente que rechaza todo (01021755 es dueño del pedido 07): va a la DLQ de notificaciones sin abrir el circuito
+POST {{host}}/diagnostics/clients/01021755/simulation
+Content-Type: application/json
+
+{ "failFirstAttempts": 0, "rejectAlways": true }
+
+###
+POST {{host}}/webhooks/tms
+Content-Type: application/json
+X-Api-Key: {{apiKey}}
+
+{
+  "serviceType": "LAST_MILE",
+  "dispatchType": "HOME_DELIVERY",
+  "status": "STARTED",
+  "details": { "orderNumber": "2500000007-01", "clientCode": "01021755" },
+  "eventDate": "2025-04-15 13:00:00"
+}
+
+###
+GET {{host}}/diagnostics/subscriptions/notifications/dead-letters
+
+### 14b. Corrige al cliente y reprocesa (usa el messageId que devolvió la petición anterior)
+POST {{host}}/diagnostics/clients/01021755/simulation
+Content-Type: application/json
+
+{ "failFirstAttempts": 0, "rejectAlways": false }
+
+###
+POST {{host}}/diagnostics/subscriptions/notifications/dead-letters/PEGA-AQUI-EL-MESSAGE-ID/reprocess

@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/Elementos de la solución/">
+    <File Path="README.md" />
+  </Folder>
+  <Project Path="Integracion.TmsOms.Api/Integracion.TmsOms.Api.csproj" />
+  <Project Path="Integracion.TmsOms.Application/Integracion.TmsOms.Application.csproj" />
+  <Project Path="Integracion.TmsOms.Domain/Integracion.TmsOms.Domain.csproj" />
+  <Project Path="Integracion.TmsOms.Infrastructure/Integracion.TmsOms.Infrastructure.csproj" />
+  <Project Path="Integracion.TmsOms.Tests/Integracion.TmsOms.Tests.csproj" />
+</Solution>
